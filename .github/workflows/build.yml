@@ -25,7 +25,7 @@ jobs:
           pip install platformio
 
       - name: Build firmware
-        run: pio run -e nodemcuv2
+        run: pio run -e d1_mini
 
       - name: Create release
         id: create_release
