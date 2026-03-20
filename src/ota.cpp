@@ -2,10 +2,13 @@
 #include <ESP8266WiFi.h>
 #include <ArduinoOTA.h>
 #include "ota.h"
-#include <ESP8266HTTPClient.h>
-#include <ESP8266httpUpdate.h>
+#include <ESP_OTA_GitHub.h>
 #include <WiFiClientSecureBearSSL.h>
 #include "config.h"
+
+BearSSL::CertStore certStore;
+String currentTag = "1.0.1"; // Update this to match version.txt
+ESP_OTA_GitHub ESPOTAGitHub(&certStore, GHOTA_USER, GHOTA_REPO, currentTag.c_str(), GHOTA_BIN_FILE, GHOTA_ACCEPT_PRERELEASE);
 
 void setupOTA()
 {
@@ -50,97 +53,44 @@ OTAUpdater::OTAUpdater() {}
 
 void OTAUpdater::begin()
 {
-    // nada por ahora
+    // Initialize certStore with dummy data since we're using setInsecure
+    // But for proper security, generate and upload certs.ar to SPIFFS
+    // For now, we'll use insecure for simplicity
 }
 
 void OTAUpdater::checkForUpdate()
 {
-    Serial.println("Iniciando check de versión...");
+    Serial.println("Checking for OTA update from GitHub...");
 
     if (WiFi.status() != WL_CONNECTED)
     {
-        Serial.println("WiFi no conectado, abortando check.");
+        Serial.println("WiFi not connected, aborting check.");
         return;
     }
 
-    Serial.print("IP local: ");
+    Serial.print("Local IP: ");
     Serial.println(WiFi.localIP());
 
-    // DNS check
-    IPAddress ip;
-    Serial.println("Resolviendo raw.githubusercontent.com...");
-    if (WiFi.hostByName("raw.githubusercontent.com", ip))
+    // Use insecure client for simplicity
+    BearSSL::WiFiClientSecure client;
+    client.setInsecure();
+    ESPOTAGitHub.setClient(&client);
+
+    if (ESPOTAGitHub.checkUpgrade())
     {
-        Serial.print("raw.githubusercontent.com -> ");
-        Serial.println(ip);
-    }
-    else
-    {
-        Serial.println("Fallo en resolución DNS para raw.githubusercontent.com");
-    }
-
-    // Cliente HTTPS para descargar version.txt
-    BearSSL::WiFiClientSecure client1;
-    client1.setInsecure();
-    HTTPClient http;
-
-    Serial.print("Conectando a: ");
-    Serial.println(UPDATE_VERSION_URL);
-
-    if (!http.begin(client1, UPDATE_VERSION_URL))
-    {
-        Serial.println("http.begin() falló");
-        return;
-    }
-
-    int code = http.GET();
-    Serial.printf("http.GET() -> %d\n", code);
-
-    if (code == HTTP_CODE_OK)
-    {
-        String version = http.getString();
-        version.trim();
-        http.end(); // Cierra la conexión anterior
-
-        Serial.printf("Versión remota: %s\n", version.c_str());
-        if (version != CURRENT_VERSION)
+        Serial.println("Upgrade available, starting update...");
+        if (ESPOTAGitHub.doUpgrade())
         {
-            Serial.println("Nueva versión disponible, descargando firmware...");
-            Serial.print("URL de descarga: ");
-            Serial.println(UPDATE_BIN_URL);
-
-            // Crear un nuevo cliente HTTPS específicamente para ESPhttpUpdate
-            // Usar WiFiClientSecure con setInsecure() para evitar problemas de certificado
-            std::unique_ptr<BearSSL::WiFiClientSecure> client2(new BearSSL::WiFiClientSecure());
-            client2->setInsecure();
-            client2->setBufferSizes(512, 512);
-
-            Serial.println("Iniciando descarga de firmware...");
-            t_httpUpdate_return ret = ESPhttpUpdate.update(*client2, UPDATE_BIN_URL);
-            Serial.printf("ESPhttpUpdate.update() retornó: %d\n", ret);
-
-            if (ret == HTTP_UPDATE_OK)
-            {
-                Serial.println("Actualización OK.");
-            }
-            else if (ret == HTTP_UPDATE_FAILED)
-            {
-                Serial.printf("Update failed: %d - %s\n", ESPhttpUpdate.getLastError(), ESPhttpUpdate.getLastErrorString().c_str());
-            }
-            else if (ret == HTTP_UPDATE_NO_UPDATES)
-            {
-                Serial.println("No updates available.");
-            }
+            Serial.println("Upgrade successful!");
         }
         else
         {
-            Serial.println("Firmware ya actualizado.");
+            Serial.printf("Upgrade failed: %s\n", ESPOTAGitHub.getLastError().c_str());
         }
     }
     else
     {
-        Serial.printf("Error al obtener version.txt: %d\n", code);
+        Serial.println("No upgrade available or check failed.");
+        Serial.printf("Last error: %s\n", ESPOTAGitHub.getLastError().c_str());
     }
-
-    http.end();
 }
