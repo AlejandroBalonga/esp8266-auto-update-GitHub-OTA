@@ -8,8 +8,11 @@
 
 BearSSL::CertStore certStore;
 String currentTag = "1.0.1"; // Update this to match version.txt
-ESP_OTA_GitHub ESPOTAGitHub(&certStore, GHOTA_USER, GHOTA_REPO, currentTag.c_str(), GHOTA_BIN_FILE, GHOTA_ACCEPT_PRERELEASE);
+ESPOTAGitHub espotagitHub(&certStore, GHOTA_USER, GHOTA_REPO, currentTag.c_str(), GHOTA_BIN_FILE, GHOTA_ACCEPT_PRERELEASE);
 
+// Variables globales para descarga por chunks
+static const size_t CHUNK_SIZE = 4096; // 4KB chunks
+static uint8_t chunkBuffer[CHUNK_SIZE];
 void setupOTA()
 {
     ArduinoOTA.onStart([]()
@@ -58,6 +61,101 @@ void OTAUpdater::begin()
     // For now, we'll use insecure for simplicity
 }
 
+// Descarga por chunks directamente a la flash
+bool downloadAndUpdateFirmware(const char *url)
+{
+    Serial.println("Iniciando descarga por chunks...");
+
+    std::unique_ptr<BearSSL::WiFiClientSecure> client(new BearSSL::WiFiClientSecure());
+    client->setInsecure();
+
+    HTTPClient http;
+    http.begin(*client, url);
+    http.addHeader("User-Agent", "ESP8266-Auto-Update");
+
+    int httpCode = http.GET();
+    Serial.printf("HTTP Code: %d\n", httpCode);
+
+    if (httpCode != HTTP_CODE_OK)
+    {
+        Serial.printf("Error HTTP: %d\n", httpCode);
+        http.end();
+        return false;
+    }
+
+    size_t contentLength = http.getSize();
+    Serial.printf("Tamaño del firmware: %d bytes\n", contentLength);
+
+    // Iniciar actualización OTA
+    if (!Update.begin(contentLength))
+    {
+        Serial.println("No hay espacio suficiente para actualización");
+        http.end();
+        return false;
+    }
+
+    WiFiClient *stream = http.getStreamPtr();
+    size_t written = 0;
+    size_t lastProgress = 0;
+
+    // Descargar y escribir por chunks
+    while (http.connected() && written < contentLength)
+    {
+        size_t available = stream->available();
+        if (available)
+        {
+            size_t bytesToRead = (available > CHUNK_SIZE) ? CHUNK_SIZE : available;
+            int bytesRead = stream->readBytes(chunkBuffer, bytesToRead);
+
+            if (bytesRead > 0)
+            {
+                // Escribir chunk a la flash
+                size_t written_chunk = Update.write(chunkBuffer, bytesRead);
+                written += written_chunk;
+
+                // Mostrar progreso cada 10%
+                size_t currentProgress = (written * 100) / contentLength;
+                if (currentProgress - lastProgress >= 10)
+                {
+                    Serial.printf("Progreso: %d%% (%d/%d bytes)\n", currentProgress, written, contentLength);
+                    lastProgress = currentProgress;
+                }
+
+                // Dar tiempo al ESP para otros procesos
+                yield();
+            }
+        }
+        else
+        {
+            delay(1); // Esperar datos disponibles
+        }
+
+        // Timeout de seguridad
+        if (!http.connected() && written < contentLength)
+        {
+            Serial.println("Conexión perdida durante descarga");
+            http.end();
+            // Update.abort() does not exist on the ESP8266 Update class; end the update to clean up
+            Update.end();
+            return false;
+        }
+    }
+
+    http.end();
+
+    // Finalizar actualización
+    if (Update.end())
+    {
+        Serial.printf("Actualización completada: %d bytes escritos\n", written);
+        return true;
+    }
+    else
+    {
+        Serial.printf("Error al finalizar Update: %s\n", Update.getErrorString().c_str());
+        return false;
+    }
+}
+
 void OTAUpdater::checkForUpdate()
 {
     Serial.println("Checking for OTA update from GitHub...");
@@ -71,26 +169,24 @@ void OTAUpdater::checkForUpdate()
     Serial.print("Local IP: ");
     Serial.println(WiFi.localIP());
 
-    // Use insecure client for simplicity
-    BearSSL::WiFiClientSecure client;
-    client.setInsecure();
-    ESPOTAGitHub.setClient(&client);
+    // Si se quiere validar certificado, inicializar tiempo en la librería embebida
+    // no hace falta objeto externo client para checkUpgrade/doUpgrade.
 
-    if (ESPOTAGitHub.checkUpgrade())
+    if (espotagitHub.checkUpgrade())
     {
         Serial.println("Upgrade available, starting update...");
-        if (ESPOTAGitHub.doUpgrade())
+        if (espotagitHub.doUpgrade())
         {
             Serial.println("Upgrade successful!");
         }
         else
         {
-            Serial.printf("Upgrade failed: %s\n", ESPOTAGitHub.getLastError().c_str());
+            Serial.printf("Upgrade failed: %s\n", espotagitHub.getLastError().c_str());
         }
     }
     else
     {
         Serial.println("No upgrade available or check failed.");
-        Serial.printf("Last error: %s\n", ESPOTAGitHub.getLastError().c_str());
+        Serial.printf("Last error: %s\n", espotagitHub.getLastError().c_str());
     }
 }
