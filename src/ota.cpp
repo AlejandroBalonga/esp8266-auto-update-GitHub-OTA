@@ -4,6 +4,7 @@
 #include "ota.h"
 #include <ESP_OTA_GitHub.h>
 #include <WiFiClientSecureBearSSL.h>
+#include <LittleFS.h>
 #include "config.h"
 
 BearSSL::CertStore certStore;
@@ -56,9 +57,15 @@ OTAUpdater::OTAUpdater() {}
 
 void OTAUpdater::begin()
 {
-    // Initialize certStore with dummy data since we're using setInsecure
-    // But for proper security, generate and upload certs.ar to SPIFFS
-    // For now, we'll use insecure for simplicity
+    // Initialize LittleFS and certificate store for secure HTTPS connections
+    LittleFS.begin();
+    int numCerts = certStore.initCertStore(LittleFS, PSTR("/certs.idx"), PSTR("/certs.ar"));
+    Serial.printf("Number of CA certs read: %d\n", numCerts);
+    if (numCerts == 0)
+    {
+        Serial.println("No certs found. Did you upload certs.ar to LittleFS?");
+        // Continue anyway, but HTTPS may fail
+    }
 }
 
 // Descarga por chunks directamente a la flash
@@ -171,6 +178,13 @@ void OTAUpdater::checkForUpdate()
 
     // Si se quiere validar certificado, inicializar tiempo en la librería embebida
     // no hace falta objeto externo client para checkUpgrade/doUpgrade.
+
+    WiFiClientSecure test;
+    test.setInsecure();
+    if (test.connect("api.github.com", 443))
+        Serial.println("GITHUB OK");
+    else
+        Serial.println("GITHUB FAIL");
 
     if (espotagitHub.checkUpgrade())
     {

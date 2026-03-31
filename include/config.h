@@ -1,8 +1,10 @@
 #pragma once
 
 // WiFi
-#define WIFI_SSID "Argul-iot"
-#define WIFI_PASS ""
+// #define WIFI_SSID "Argul-iot"
+#define WIFI_SSID "DESKTOPT_440"
+// #define WIFI_PASS ""
+#define WIFI_PASS "aabbccdd"
 
 // GitHub OTA settings
 #define GHOTA_USER "AlejandroBalonga"
