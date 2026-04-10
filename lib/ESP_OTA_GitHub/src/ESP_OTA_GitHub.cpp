@@ -189,58 +189,76 @@ bool ESPOTAGitHub::checkUpgrade()
     }
 
     String response = client.readStringUntil('\n');
-    //client->stop();
-      
+    // client->stop();
+
     // --- ArduinoJSON v6 --- //
-     
+
     // Get from https://arduinojson.org/v6/assistant/
-    const size_t capacity = JSON_ARRAY_SIZE(3) + 3*JSON_OBJECT_SIZE(13) + 5*JSON_OBJECT_SIZE(18) + 5560;
+    const size_t capacity = JSON_ARRAY_SIZE(3) + 3 * JSON_OBJECT_SIZE(13) + 5 * JSON_OBJECT_SIZE(18) + 5560;
 
     DynamicJsonDocument doc(capacity);
-      
+
     DeserializationError error = deserializeJson(doc, response);
-      
-    if (!error) {
-        if (doc.containsKey("tag_name")) {
-            const char* release_tag = doc["tag_name"];
-            const char* release_name = doc["name"];
+
+    if (!error)
+    {
+        if (doc.containsKey("tag_name"))
+        {
+            const char *release_tag = doc["tag_name"];
+            const char *release_name = doc["name"];
             bool release_prerelease = doc["prerelease"];
-            if (strcmp(release_tag, _currentTag) != 0) {
-                if (!_preRelease) {
-                    if (release_prerelease) {
+            if (strcmp(release_tag, _currentTag) != 0)
+            {
+                if (!_preRelease)
+                {
+                    if (release_prerelease)
+                    {
                         _lastError = "Latest release is a pre-release and GHOTA_ACCEPT_PRERELEASE is set to false.";
                         return false;
                     }
                 }
                 JsonArray assets = doc["assets"];
                 bool valid_asset = false;
-                for (auto asset : assets) {
-                    const char* asset_type = asset["content_type"];
-                    const char* asset_name = asset["name"];
-                    const char* asset_url = asset["browser_download_url"];
-                      
-                    if (strcmp(asset_type, GHOTA_CONTENT_TYPE) == 0 && strcmp(asset_name, _binFile) == 0) {
+                for (auto asset : assets)
+                {
+                    const char *asset_type = asset["content_type"];
+                    const char *asset_name = asset["name"];
+                    const char *asset_url = asset["browser_download_url"];
+
+                    if (strcmp(asset_type, GHOTA_CONTENT_TYPE) == 0 && strcmp(asset_name, _binFile) == 0)
+                    {
                         _upgradeURL = asset_url;
                         valid_asset = true;
-                    } else {
+                    }
+                    else
+                    {
                         valid_asset = false;
                     }
                 }
-                if (valid_asset) {
+                if (valid_asset)
+                {
                     return true;
-                } else {
+                }
+                else
+                {
                     _lastError = "No valid binary found for latest release.";
                     return false;
                 }
-            } else {
+            }
+            else
+            {
                 _lastError = "Already running latest release.";
                 return false;
             }
-        } else {
+        }
+        else
+        {
             _lastError = "JSON didn't match expected structure. 'tag_name' missing.";
             return false;
         }
-    } else {
+    }
+    else
+    {
         _lastError = "Failed to parse JSON."; // Error was: " + error.c_str();
         return false;
     }
@@ -249,49 +267,57 @@ bool ESPOTAGitHub::checkUpgrade()
 
 bool ESPOTAGitHub::doUpgrade()
 {
-    if (_upgradeURL == "") {
+    if (_upgradeURL == "")
+    {
         //_lastError = "No upgrade URL set, run checkUpgrade() first.";
-        //return false;
-        
-        if(!checkUpgrade()) {
+        // return false;
+
+        if (!checkUpgrade())
+        {
             return false;
         }
-    } else {
+    }
+    else
+    {
         _setClock(); // Clock needs to be set to perform certificate checks
         // Don't need to do this if running check upgrade first, as it will have just been done there.
     }
 
     _resolveRedirects();
-    
+
     urlDetails_t splitURL = _urlDetails(_upgradeURL);
-    
+
     BearSSL::WiFiClientSecure client;
-    if (_useInsecure) {
+    if (_useInsecure)
+    {
         client.setInsecure();
     }
     bool mfln = client.probeMaxFragmentLength(splitURL.host, splitURL.port, 1024);
-    if (mfln) {
+    if (mfln)
+    {
         client.setBufferSizes(1024, 1024);
     }
-    if (!_useInsecure) {
+    if (!_useInsecure)
+    {
         client.setCertStore(_certStore);
     }
 
     ESPhttpUpdate.setLedPin(LED_BUILTIN, LOW);
     t_httpUpdate_return ret = ESPhttpUpdate.update(client, _upgradeURL);
 
-    switch (ret) {
-        case HTTP_UPDATE_FAILED:
-            _lastError = ESPhttpUpdate.getLastErrorString();
-            return false;
+    switch (ret)
+    {
+    case HTTP_UPDATE_FAILED:
+        _lastError = ESPhttpUpdate.getLastErrorString();
+        return false;
 
-        case HTTP_UPDATE_NO_UPDATES:
-            _lastError = "HTTP_UPDATE_NO_UPDATES";
-            return false;
+    case HTTP_UPDATE_NO_UPDATES:
+        _lastError = "HTTP_UPDATE_NO_UPDATES";
+        return false;
 
-        case HTTP_UPDATE_OK:
-            _lastError = "HTTP_UPDATE_OK";
-            return true;
+    case HTTP_UPDATE_OK:
+        _lastError = "HTTP_UPDATE_OK";
+        return true;
     }
 
     // Just in case we get an unexpected return code
@@ -299,10 +325,12 @@ bool ESPOTAGitHub::doUpgrade()
     return false;
 }
 
-String ESPOTAGitHub::getLastError() {
+String ESPOTAGitHub::getLastError()
+{
     return _lastError;
 }
 
-String ESPOTAGitHub::getUpgradeURL() {
+String ESPOTAGitHub::getUpgradeURL()
+{
     return _upgradeURL;
 }
