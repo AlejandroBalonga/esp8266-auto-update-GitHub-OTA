@@ -6,6 +6,7 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <Updater.h>
+#include <time.h>
 #include <memory>
 #include "ota.h"
 #include "config.h"
@@ -30,7 +31,7 @@ static bool initCertificateStore()
     if (numCerts > 0)
     {
         Serial.println("Certificados cargados correctamente.");
-        secureMode = true;
+        secureMode = false; // Forzar inseguro para probar
         return true;
     }
 
@@ -39,17 +40,52 @@ static bool initCertificateStore()
     return false;
 }
 
+static bool isTimeValid()
+{
+    time_t now = time(nullptr);
+    return now > 8 * 3600 * 2;
+}
+
+static bool syncTime()
+{
+    configTime(0, 0, "pool.ntp.org", "time.nist.gov");
+    Serial.print("Sincronizando hora NTP...");
+    time_t now = time(nullptr);
+    unsigned long start = millis();
+    while (!isTimeValid() && millis() - start < 15000)
+    {
+        delay(500);
+        Serial.print(".");
+        now = time(nullptr);
+    }
+    Serial.println();
+    if (!isTimeValid())
+    {
+        Serial.println("No se pudo sincronizar la hora.");
+        return false;
+    }
+    struct tm timeinfo;
+    gmtime_r(&now, &timeinfo);
+    Serial.print("Hora actual: ");
+    Serial.print(asctime(&timeinfo));
+    return true;
+}
+
 static std::unique_ptr<BearSSL::WiFiClientSecure> createSecureClient()
 {
+    Serial.printf("createSecureClient: secureMode=%d\n", secureMode ? 1 : 0);
     auto client = std::make_unique<BearSSL::WiFiClientSecure>();
     if (secureMode)
     {
+        Serial.println("createSecureClient: usando cert store");
         client->setCertStore(&certStore);
     }
     else
     {
+        Serial.println("createSecureClient: usando inseguro");
         client->setInsecure();
     }
+    Serial.println("createSecureClient: cliente creado");
     return client;
 }
 
@@ -58,32 +94,43 @@ static bool followRedirects(HTTPClient &http, BearSSL::WiFiClientSecure &client,
     String currentUrl = url;
     for (int redirect = 0; redirect < 4; redirect++)
     {
+        Serial.printf("HTTP begin: %s\n", currentUrl.c_str());
         if (!http.begin(client, currentUrl))
         {
+            Serial.println("http.begin() falló");
             return false;
         }
+        http.setTimeout(15000);
         http.addHeader("User-Agent", OTA_USER_AGENT);
         httpCode = http.GET();
+        Serial.printf("HTTP GET returned: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
         if (httpCode == HTTP_CODE_MOVED_PERMANENTLY || httpCode == HTTP_CODE_FOUND || httpCode == HTTP_CODE_SEE_OTHER || httpCode == HTTP_CODE_TEMPORARY_REDIRECT || httpCode == HTTP_CODE_PERMANENT_REDIRECT)
         {
             currentUrl = http.header("Location");
             http.end();
             if (currentUrl.length() == 0)
             {
+                Serial.println("Redirección sin Location header.");
                 return false;
             }
+            delay(10);
             continue;
         }
         return true;
     }
+    Serial.println("Demasiadas redirecciones.");
     return false;
 }
 
 static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
 {
+    Serial.println("getLatestReleaseInfo: inicio");
     String apiUrl = String("https://api.github.com/repos/") + GHOTA_USER + "/" + GHOTA_REPO + "/releases/latest";
+    Serial.printf("API URL: %s\n", apiUrl.c_str());
     auto client = createSecureClient();
+    Serial.printf("createSecureClient completo, secureMode=%d\n", secureMode ? 1 : 0);
     HTTPClient http;
+    Serial.println("HTTPClient creado");
     int httpCode = 0;
 
     if (!followRedirects(http, *client, apiUrl, httpCode))
@@ -94,22 +141,26 @@ static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
 
     if (httpCode != HTTP_CODE_OK)
     {
-        Serial.printf("GitHub API HTTP error: %d\n", httpCode);
+        Serial.printf("GitHub API HTTP error: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
         http.end();
         return false;
     }
 
-    String payload = http.getString();
-    http.end();
+    Serial.printf("GitHub response size: %d\n", http.getSize());
+    Serial.printf("Free heap before JSON parse: %u\n", ESP.getFreeHeap());
+    Stream &responseStream = *http.getStreamPtr();
 
-    StaticJsonDocument<16384> doc;
-    DeserializationError error = deserializeJson(doc, payload);
+    StaticJsonDocument<8192> doc;
+    Serial.printf("Free heap after document alloc: %u\n", ESP.getFreeHeap());
+    DeserializationError error = deserializeJson(doc, responseStream);
     if (error)
     {
-        Serial.print("Error parsing JSON: ");
+        Serial.print("Error parsing JSON from stream: ");
         Serial.println(error.c_str());
+        http.end();
         return false;
     }
+    http.end();
 
     tagName = doc["tag_name"].as<String>();
     if (tagName.length() == 0)
@@ -152,8 +203,13 @@ static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
 
 static bool downloadFirmware(const String &downloadUrl)
 {
+    Serial.println("downloadFirmware: inicio");
+    Serial.printf("downloadFirmware secureMode=%d\n", secureMode ? 1 : 0);
+    Serial.printf("downloadUrl: %s\n", downloadUrl.c_str());
     auto client = createSecureClient();
+    Serial.println("downloadFirmware: createSecureClient completo");
     HTTPClient http;
+    Serial.println("downloadFirmware: HTTPClient creado");
     int httpCode = 0;
 
     if (!followRedirects(http, *client, downloadUrl, httpCode))
@@ -164,7 +220,7 @@ static bool downloadFirmware(const String &downloadUrl)
 
     if (httpCode != HTTP_CODE_OK)
     {
-        Serial.printf("Firmware download HTTP error: %d\n", httpCode);
+        Serial.printf("Firmware download HTTP error: %d (%s)\n", httpCode, http.errorToString(httpCode).c_str());
         http.end();
         return false;
     }
@@ -246,6 +302,13 @@ void OTAUpdater::begin()
     if (!initCertificateStore())
     {
         Serial.println("Usando modo inseguro para conexiones HTTPS.");
+        return;
+    }
+
+    if (!syncTime())
+    {
+        Serial.println("Usando modo inseguro porque no se pudo sincronizar la hora.");
+        secureMode = false;
     }
 }
 
@@ -280,6 +343,7 @@ void OTAUpdater::checkForUpdate()
     }
 
     Serial.println("Nueva versión encontrada, descargando firmware...");
+    Serial.printf("URL de descarga: %s\n", downloadUrl.c_str());
     if (downloadFirmware(downloadUrl))
     {
         Serial.println("Firmware descargado correctamente. Reiniciando...");
