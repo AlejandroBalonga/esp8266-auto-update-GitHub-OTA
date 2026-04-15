@@ -9,6 +9,8 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # necesario para crear releases y subir assets
 
     steps:
       - uses: actions/checkout@v3
