@@ -219,24 +219,81 @@ static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
 }
 
 // ---------------------------------------------------------------------------
+// Resuelve redirecciones y devuelve la URL final (sin descargar el body)
+// Usa un cliente propio que se destruye al salir.
+// ---------------------------------------------------------------------------
+static String resolveRedirects(const String &startUrl)
+{
+    String currentUrl = startUrl;
+    for (int i = 0; i < 5; i++)
+    {
+        auto client = createSecureClient();
+        HTTPClient http;
+        http.end();
+        if (!http.begin(*client, currentUrl))
+            break;
+        http.setTimeout(10000);
+        http.addHeader("User-Agent", OTA_USER_AGENT);
+        const char *headerKeys[] = {"Location"};
+        http.collectHeaders(headerKeys, 1);
+
+        // HEAD en vez de GET: no descarga el body, solo los headers
+        int code = http.sendRequest("HEAD");
+        Serial.printf("resolveRedirects [%d]: %d → %s\n", i, code, currentUrl.c_str());
+
+        if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
+        {
+            String location = http.header("Location");
+            http.end();
+            if (location.isEmpty())
+                break;
+            currentUrl = location;
+            yield();
+            continue;
+        }
+        http.end();
+        // código 200 o cualquier no-redirect → esta es la URL final
+        return currentUrl;
+    }
+    return currentUrl; // devolvemos lo último que teníamos
+}
+
+// ---------------------------------------------------------------------------
 // Descarga el firmware y lo escribe en flash con el Updater
+// FIX: primero resuelve la URL final con resolveRedirects() y luego
+// abre una conexión NUEVA y LIMPIA para la descarga real.
+// Esto evita el problema de reutilizar un cliente SSL que ya negoció
+// TLS con un host diferente (github.com vs release-assets.githubusercontent.com)
 // ---------------------------------------------------------------------------
 static bool downloadFirmware(const String &downloadUrl)
 {
     Serial.println("downloadFirmware: inicio");
-    Serial.printf("URL: %s\n", downloadUrl.c_str());
+    Serial.printf("URL original: %s\n", downloadUrl.c_str());
     Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
 
-    auto client = createSecureClient();
-    HTTPClient http;
-    int httpCode = 0;
+    // Paso 1: resolver la URL final siguiendo redirects
+    String finalUrl = resolveRedirects(downloadUrl);
+    Serial.printf("URL final: %s\n", finalUrl.c_str());
+    yield();
 
-    if (!followRedirects(http, *client, downloadUrl, httpCode))
+    // Paso 2: conexión limpia a la URL final
+    auto client = createSecureClient();
+    // El binario es grande → necesitamos buffers de recepción más grandes
+    client->setBufferSizes(4096, 512);
+    HTTPClient http;
+    http.end();
+
+    Serial.println("Conectando a URL final...");
+    if (!http.begin(*client, finalUrl))
     {
-        Serial.println("Error al conectar para descargar firmware.");
-        http.end();
+        Serial.println("http.begin() a URL final falló.");
         return false;
     }
+    http.setTimeout(30000);
+    http.addHeader("User-Agent", OTA_USER_AGENT);
+
+    int httpCode = http.GET();
+    Serial.printf("HTTP GET final: %d\n", httpCode);
 
     if (httpCode != HTTP_CODE_OK)
     {
@@ -306,8 +363,7 @@ static bool downloadFirmware(const String &downloadUrl)
         }
         else
         {
-            // Timeout de 10s sin datos → abortar
-            if (millis() - lastData > 10000)
+            if (millis() - lastData > 15000)
             {
                 Serial.println("Timeout esperando datos del stream.");
                 http.end();

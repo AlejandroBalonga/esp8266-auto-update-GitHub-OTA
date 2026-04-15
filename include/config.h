@@ -5,7 +5,7 @@
 #define WIFI_PASS "aabbccdd"
 
 // Firmware version
-#define FIRMWARE_VERSION "1.0.3"
+#define FIRMWARE_VERSION "1.0.4"
 
 // GitHub OTA settings
 #define GHOTA_USER "AlejandroBalonga"
