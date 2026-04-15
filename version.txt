@@ -1,1 +1,10 @@
 1.0.1
+# 1. Actualizás FIRMWARE_VERSION en config.h a "1.0.2"
+# 2. Commit y push normal
+git add .
+git commit -m "bump version 1.0.2"
+git push
+
+# 3. Creás el tag con el mismo número (sin v)
+git tag 1.0.2
+git push origin 1.0.2
