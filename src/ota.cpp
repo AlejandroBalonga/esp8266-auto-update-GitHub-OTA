@@ -280,6 +280,8 @@ static bool downloadFirmware(const String &downloadUrl)
     auto client = createSecureClient();
     // El binario es grande → necesitamos buffers de recepción más grandes
     client->setBufferSizes(4096, 512);
+    // Timeout generoso para que readBytes no corte entre chunks SSL
+    client->setTimeout(30000);
     HTTPClient http;
     http.end();
 
@@ -327,50 +329,52 @@ static bool downloadFirmware(const String &downloadUrl)
     int lastProgress = -10;
     unsigned long lastData = millis();
 
-    while (http.connected() && (contentLength <= 0 || written < contentLength))
+    // FIX: no usar http.connected() como condición de corte.
+    // Con SSL + chunked transfer el socket puede parecer cerrado entre chunks
+    // aunque queden datos por llegar. El criterio real es haber recibido
+    // todos los bytes según Content-Length.
+    while (written < contentLength)
     {
-        size_t available = stream->available();
-        if (available)
+        // readBytes bloquea hasta leer toRead bytes o timeout del cliente
+        size_t remaining = (size_t)(contentLength - written);
+        size_t toRead = min(remaining, CHUNK_BUFFER_SIZE);
+        int bytesRead = stream->readBytes(chunkBuffer, toRead);
+
+        if (bytesRead > 0)
         {
             lastData = millis();
-            size_t toRead = min(available, CHUNK_BUFFER_SIZE);
-            int bytesRead = stream->readBytes(chunkBuffer, toRead);
-            if (bytesRead > 0)
+            size_t bytesWritten = Update.write(chunkBuffer, bytesRead);
+            if (bytesWritten != (size_t)bytesRead)
             {
-                size_t bytesWritten = Update.write(chunkBuffer, bytesRead);
-                if (bytesWritten != (size_t)bytesRead)
-                {
-                    Serial.printf("Error escribiendo chunk: %s\n",
-                                  Update.getErrorString().c_str());
-                    http.end();
-                    Update.end();
-                    return false;
-                }
-                written += bytesWritten;
-
-                if (contentLength > 0)
-                {
-                    int progress = (written * 100) / contentLength;
-                    if (progress - lastProgress >= 10)
-                    {
-                        Serial.printf("Progreso: %d%% (%d/%d bytes)\n",
-                                      progress, written, contentLength);
-                        lastProgress = progress;
-                    }
-                }
-                yield();
-            }
-        }
-        else
-        {
-            if (millis() - lastData > 15000)
-            {
-                Serial.println("Timeout esperando datos del stream.");
+                Serial.printf("Error escribiendo chunk: %s\n",
+                              Update.getErrorString().c_str());
                 http.end();
                 Update.end();
                 return false;
             }
-            delay(1);
+            written += bytesWritten;
+
+            int progress = (written * 100) / contentLength;
+            if (progress - lastProgress >= 10)
+            {
+                Serial.printf("Progreso: %d%% (%d/%d bytes)\n",
+                              progress, written, contentLength);
+                lastProgress = progress;
+            }
+            yield();
+        }
+        else
+        {
+            // readBytes devolvió 0 → timeout del stream o conexión cortada
+            if (millis() - lastData > 15000)
+            {
+                Serial.printf("Timeout: solo se recibieron %d/%d bytes.\n",
+                              written, contentLength);
+                http.end();
+                Update.end();
+                return false;
+            }
+            delay(10);
             yield();
         }
     }
