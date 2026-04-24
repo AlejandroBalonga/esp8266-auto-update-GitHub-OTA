@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP8266 Auto Update - Documentación y Herramientas</title>
+    <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+    <style>
+        :root { --primary: #0366d6; --bg: #f6f8fa; --text: #24292e; --border: #e1e4e8; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: var(--text); background: var(--bg); max-width: 900px; margin: 0 auto; padding: 20px; }
+        h1, h2, h3 { border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
+        .card { background: white; border: 1px solid var(--border); border-radius: 6px; padding: 20px; margin-bottom: 20px; }
+        code { background: rgba(27,31,35,0.05); padding: 0.2em 0.4em; border-radius: 3px; font-family: monospace; }
+        pre { background: #1b1f23; color: white; padding: 16px; overflow: auto; border-radius: 6px; }
+        input[type="text"], input[type="password"] { width: 100%; padding: 8px; margin: 8px 0 16px; border: 1px solid var(--border); border-radius: 4px; box-sizing: border-box;}
+        button { background-color: var(--primary); color: white; border: none; padding: 10px 15px; border-radius: 4px; cursor: pointer; font-weight: bold; margin-right: 10px; }
+        button:hover { background-color: #005cc5; }
+        button:disabled { background-color: #94d3a2; cursor: not-allowed; }
+        #terminal { background: #000; color: #0f0; padding: 10px; height: 200px; overflow-y: scroll; font-family: monospace; border-radius: 4px; margin-top: 10px;}
+        .flex-container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .flex-child { flex: 1; min-width: 300px; }
+    </style>
+</head>
+<body>
+
+    <h1>ESP8266 Auto Update (OTA)</h1>
+    <p>Librería para la actualización automática (OTA) de placas ESP8266 apuntando a un repositorio. Administra tu firmware de forma remota y sencilla.</p>
+
+    <div class="card">
+        <h2>📖 1. Cómo usar esta librería</h2>
+        <p>Para integrar esta librería en tu proyecto de Arduino/PlatformIO:</p>
+        <ol>
+            <li>Descarga o clona este repositorio en la carpeta de librerías de tu entorno.</li>
+            <li>Incluye la cabecera principal en tu código: <code>#include "ESP8266AutoUpdate.h"</code></li>
+            <li>Inicializa la clase con la URL de tu repositorio donde se aloja el archivo <code>.bin</code> y el archivo de versión.</li>
+            <li>Llama al método de comprobación dentro de tu <code>setup()</code> o periódicamente en el <code>loop()</code>.</li>
+        </ol>
+        <pre><code>#include &lt;ESP8266AutoUpdate.h&gt;
+
+void setup() {
+    Serial.begin(115200);
+    // Tu lógica de conexión WiFi aquí...
+    
+    // Iniciar AutoUpdate (ejemplo hipotético)
+    AutoUpdate.begin("https://raw.githubusercontent.com/TU_USUARIO/TU_REPO/main/version.json");
+    AutoUpdate.check();
+}
+
+void loop() {
+    // Tu código principal
+}</code></pre>
+    </div>
+
+    <div class="card">
+        <h2>🔀 2. Cómo Clonar y Forkear el Repositorio</h2>
+        <div class="flex-container">
+            <div class="flex-child">
+                <h3>Hacer un Fork (Bifurcar)</h3>
+                <p>Si deseas realizar modificaciones propias o contribuir a este proyecto:</p>
+                <ol>
+                    <li>Ve a la esquina superior derecha de la página de GitHub.</li>
+                    <li>Haz clic en el botón <strong>Fork</strong>.</li>
+                    <li>Esto creará una copia del proyecto en tu propia cuenta de GitHub.</li>
+                </ol>
+            </div>
+            <div class="flex-child">
+                <h3>Clonar el Repositorio</h3>
+                <p>Para descargar el código a tu computadora local, usa Git en tu terminal:</p>
+                <pre><code>git clone https://github.com/AlejandroBalonga/esp8266-auto-update.git</code></pre>
+                <p>Si hiciste un Fork, reemplaza <em>AlejandroBalonga</em> por tu nombre de usuario.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>🔌 3. Herramienta Web de Configuración y Flasheo</h2>
+        <p>Conecta tu ESP8266 por USB. Utiliza navegadores basados en Chromium (Chrome, Edge, Brave).</p>
+        
+        <h3>Paso A: Flashear Firmware Base</h3>
+        <p>Utiliza ESP Web Tools para cargar el firmware base inicial en la placa.</p>
+        <esp-web-install-button manifest="manifest.json"></esp-web-install-button>
+
+        <hr style="margin: 20px 0; border: 0; border-top: 1px solid var(--border);">
+
+        <h3>Paso B: Configurar ESP (WiFi y OTA URL)</h3>
+        <p>Una vez flasheado, conéctate por el puerto Serial para enviarle la configuración.</p>
+        
+        <div class="flex-container">
+            <div class="flex-child" style="flex: 1;">
+                <label for="ssid">WiFi SSID:</label>
+                <input type="text" id="ssid" placeholder="MiRedWiFi">
+                
+                <label for="pass">WiFi Password:</label>
+                <input type="password" id="pass" placeholder="Contraseña">
+                
+                <label for="otaUrl">URL del Repositorio (OTA):</label>
+                <input type="text" id="otaUrl" placeholder="https://raw.githubusercontent.com/...">
+                
+                <div style="margin-top: 10px;">
+                    <button id="connectSerialBtn">Conectar Serial</button>
+                    <button id="sendConfigBtn" disabled>Enviar Configuración</button>
+                    <button id="readInfoBtn" disabled>Leer Info del ESP</button>
+                </div>
+            </div>
+            <div class="flex-child" style="flex: 2;">
+                <strong>Consola del ESP8266:</strong>
+                <div id="terminal">Esperando conexión...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let port;
+        let reader;
+        let inputDone;
+        let outputDone;
+        let inputStream;
+        let outputStream;
+
+        const terminal = document.getElementById('terminal');
+        const connectBtn = document.getElementById('connectSerialBtn');
+        const sendBtn = document.getElementById('sendConfigBtn');
+        const readBtn = document.getElementById('readInfoBtn');
+
+        function logToTerminal(text) {
+            terminal.innerHTML += text + '<br>';
+            terminal.scrollTop = terminal.scrollHeight;
+        }
+
+        connectBtn.addEventListener('click', async () => {
+            if (port) {
+                await disconnect();
+                connectBtn.innerText = 'Conectar Serial';
+                return;
+            }
+
+            try {
+                // Solicitar puerto al usuario
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 }); // Configura el baudRate de tu ESP
+                
+                connectBtn.innerText = 'Desconectar Serial';
+                sendBtn.disabled = false;
+                readBtn.disabled = false;
+                logToTerminal('✅ Conectado al puerto Serial.');
+
+                // Configurar lectura continua
+                const decoder = new TextDecoderStream();
+                inputDone = port.readable.pipeTo(decoder.writable);
+                inputStream = decoder.readable;
+
+                const encoder = new TextEncoderStream();
+                outputDone = encoder.readable.pipeTo(port.writable);
+                outputStream = encoder.writable;
+
+                readLoop();
+            } catch (err) {
+                logToTerminal('❌ Error de conexión: ' + err);
+            }
+        });
+
+        async function readLoop() {
+            reader = inputStream.getReader();
+            try {
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    if (value) {
+                        // Reemplazar saltos de línea para HTML
+                        const text = value.replace(/\n/g, '<br>');
+                        terminal.innerHTML += text;
+                        terminal.scrollTop = terminal.scrollHeight;
+                    }
+                }
+            } catch (err) {
+                console.error(err);
+            } finally {
+                reader.releaseLock();
+            }
+        }
+
+        async function writeToStream(line) {
+            const writer = outputStream.getWriter();
+            await writer.write(line + '\n');
+            writer.releaseLock();
+        }
+
+        async function disconnect() {
+            if (reader) {
+                await reader.cancel();
+                await inputDone.catch(() => {});
+                reader = null;
+                inputDone = null;
+            }
+            if (outputStream) {
+                const writer = outputStream.getWriter();
+                await writer.close();
+                await outputDone;
+                writer.releaseLock();
+            }
+            await port.close();
+            port = null;
+            sendBtn.disabled = true;
+            readBtn.disabled = true;
+            logToTerminal('🔌 Desconectado.');
+        }
+
+        // Botón Enviar Configuración
+        sendBtn.addEventListener('click', async () => {
+            const ssid = document.getElementById('ssid').value;
+            const pass = document.getElementById('pass').value;
+            const url = document.getElementById('otaUrl').value;
+            
+            // Aquí definimos un formato simple que el ESP debe saber interpretar
+            // Por ejemplo: JSON o un comando personalizado
+            const configCommand = `SET_CONFIG:{"ssid":"${ssid}","pass":"${pass}","url":"${url}"}`;
+            
+            logToTerminal(`<i>Enviando: ${configCommand}</i>`);
+            await writeToStream(configCommand);
+        });
+
+        // Botón Leer Info
+        readBtn.addEventListener('click', async () => {
+            logToTerminal('<i>Solicitando info del ESP...</i>');
+            // Comando que el ESP debería reconocer para devolver su estado
+            await writeToStream('GET_INFO');
+        });
+    </script>
+</body>
+</html>
