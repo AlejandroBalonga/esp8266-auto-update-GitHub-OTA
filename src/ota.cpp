@@ -7,6 +7,7 @@
 #include <time.h>
 #include "ota.h"
 #include "config.h"
+#include "serial_menu.h"
 
 static uint8_t downloadBuffer[1024];
 
@@ -46,12 +47,15 @@ static void syncTime()
 // ---------------------------------------------------------------------------
 // Consulta la GitHub API y devuelve tag y URL de descarga del firmware
 // ---------------------------------------------------------------------------
-static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
+static bool getLatestReleaseInfo(const AppConfig &cfg,
+                                  String &tagName, String &downloadUrl)
 {
     Serial.println("Consultando GitHub API...");
     Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
 
-    String apiUrl = String("https://api.github.com/repos/") + GHOTA_USER + "/" + GHOTA_REPO + "/releases/latest";
+    // Usar usuario y repo desde AppConfig (configurables en runtime)
+    String apiUrl = String("https://api.github.com/repos/")
+                    + cfg.ghotaUser + "/" + cfg.ghotaRepo + "/releases/latest";
 
     WiFiClientSecure apiClient;
     apiClient.setInsecure();
@@ -76,16 +80,16 @@ static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
     }
 
     StaticJsonDocument<128> filter;
-    filter["tag_name"] = true;
-    filter["draft"] = true;
-    filter["prerelease"] = true;
-    filter["assets"][0]["name"] = true;
+    filter["tag_name"]                          = true;
+    filter["draft"]                             = true;
+    filter["prerelease"]                        = true;
+    filter["assets"][0]["name"]                 = true;
     filter["assets"][0]["browser_download_url"] = true;
 
     DynamicJsonDocument doc(3072);
     WiFiClient *stream = http.getStreamPtr();
     DeserializationError error = deserializeJson(doc, *stream,
-                                                 DeserializationOption::Filter(filter));
+                                  DeserializationOption::Filter(filter));
     http.end();
     yield();
 
@@ -133,9 +137,7 @@ static bool getLatestReleaseInfo(String &tagName, String &downloadUrl)
 }
 
 // ---------------------------------------------------------------------------
-// Paso 1: obtener la URL firmada de release-assets.githubusercontent.com
-// Hace un GET a github.com, lee el Location del 302, y cierra todo.
-// Usamos GET (no HEAD) porque github.com a veces no responde Location en HEAD.
+// Paso 1: resolver la URL firmada siguiendo el redirect 302 de GitHub
 // ---------------------------------------------------------------------------
 static String resolveGithubAssetUrl(const String &githubUrl)
 {
@@ -151,12 +153,10 @@ static String resolveGithubAssetUrl(const String &githubUrl)
     http.setTimeout(10000);
     http.addHeader("User-Agent", OTA_USER_AGENT);
 
-    // Registrar Location antes del GET
     const char *keys[] = {"Location"};
     http.collectHeaders(keys, 1);
-
-    // GET sin seguir redirects: queremos capturar el 302 y su Location
     http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+
     int code = http.GET();
     Serial.printf("resolveGithubAssetUrl HTTP: %d\n", code);
 
@@ -164,16 +164,13 @@ static String resolveGithubAssetUrl(const String &githubUrl)
     if (code == 301 || code == 302 || code == 303 || code == 307 || code == 308)
     {
         location = http.header("Location");
-        Serial.printf("Location: %s\n", location.c_str());
     }
     else if (code == HTTP_CODE_OK)
     {
-        // No hubo redirect, la URL original ya es la final
         location = githubUrl;
     }
 
     http.end();
-    // Destruir el cliente completamente antes de la descarga
     resolveClient.stop();
     yield();
     delay(100);
@@ -188,13 +185,9 @@ static bool downloadFromUrl(const String &finalUrl)
 {
     Serial.println("Descargando firmware...");
     Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
-    Serial.printf("URL: %s\n", finalUrl.substring(0, 60).c_str());
-    Serial.println("...");
 
     WiFiClientSecure *dlClient = new WiFiClientSecure();
     dlClient->setInsecure();
-    // Buffer RX maximo de BearSSL: 16KB
-    // El buffer anterior de 4KB se llenaba y el servidor cortaba la conexion
     dlClient->setBufferSizes(16384, 512);
     dlClient->setTimeout(30);
 
@@ -251,7 +244,7 @@ static bool downloadFromUrl(const String &finalUrl)
         return false;
     }
 
-    int written = 0;
+    int written      = 0;
     int lastProgress = -10;
     unsigned long lastActivity = millis();
 
@@ -263,7 +256,7 @@ static bool downloadFromUrl(const String &finalUrl)
         {
             lastActivity = millis();
             int remaining = contentLength - written;
-            int toRead = min(min(avail, remaining), (int)sizeof(downloadBuffer));
+            int toRead    = min(min(avail, remaining), (int)sizeof(downloadBuffer));
             int bytesRead = stream->read(downloadBuffer, toRead);
 
             if (bytesRead > 0)
@@ -331,35 +324,33 @@ static bool downloadFromUrl(const String &finalUrl)
 }
 
 // ---------------------------------------------------------------------------
-// Descarga el firmware en dos pasos bien separados
+// Orquesta los dos pasos de descarga
 // ---------------------------------------------------------------------------
 static bool downloadFirmware(const String &downloadUrl)
 {
-    // Paso 1: resolver la URL firmada (cliente efímero, se destruye solo)
     String finalUrl = resolveGithubAssetUrl(downloadUrl);
     if (finalUrl.isEmpty())
     {
         Serial.println("No se pudo resolver la URL del asset.");
         return false;
     }
-
-    // Paso 2: descargar con cliente completamente nuevo
     return downloadFromUrl(finalUrl);
 }
 
 // ---------------------------------------------------------------------------
-// Clase publica OTAUpdater
+// Clase pública OTAUpdater
 // ---------------------------------------------------------------------------
 OTAUpdater::OTAUpdater() {}
 
-void OTAUpdater::begin()
+void OTAUpdater::begin(const AppConfig &cfg)
 {
+    (void)cfg;
     Serial.println("OTAUpdater::begin()");
     syncTime();
     Serial.printf("Free heap tras begin: %u bytes\n", ESP.getFreeHeap());
 }
 
-void OTAUpdater::checkForUpdate()
+void OTAUpdater::checkForUpdate(const AppConfig &cfg)
 {
     Serial.println("Comprobando actualizacion OTA en GitHub...");
     Serial.printf("Free heap: %u bytes\n", ESP.getFreeHeap());
@@ -373,7 +364,7 @@ void OTAUpdater::checkForUpdate()
     String latestTag;
     String downloadUrl;
 
-    if (!getLatestReleaseInfo(latestTag, downloadUrl))
+    if (!getLatestReleaseInfo(cfg, latestTag, downloadUrl))
     {
         Serial.println("No se pudo obtener informacion de la ultima release.");
         return;

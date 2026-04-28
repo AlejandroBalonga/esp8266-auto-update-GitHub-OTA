@@ -1,14 +1,11 @@
-#ifndef OTA_H
-#define OTA_H
+#pragma once
 
-#include <Arduino.h>
+#include "serial_menu.h"   // AppConfig
 
 class OTAUpdater
 {
 public:
     OTAUpdater();
-    void begin();
-    void checkForUpdate();
+    void begin(const AppConfig &cfg);
+    void checkForUpdate(const AppConfig &cfg);
 };
-
-#endif // OTA_H

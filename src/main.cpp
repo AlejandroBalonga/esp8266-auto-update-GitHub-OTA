@@ -2,12 +2,14 @@
 #include <ESP8266WiFi.h>
 #include "config.h"
 #include "ota.h"
+#include "serial_menu.h"
 
-// D4 es el LED integrado en la mayoría de las placas D1 Mini (activo bajo)
 #define LED_PIN D4
 
 OTAUpdater updater;
-unsigned long lastCheck = 0;
+AppConfig   appCfg;
+
+unsigned long lastCheck          = 0;
 unsigned long lastReconnectAttempt = 0;
 
 void blinkLed(int times, int onMs, int offMs)
@@ -21,26 +23,12 @@ void blinkLed(int times, int onMs, int offMs)
     }
 }
 
-void setup()
+static void connectWifi()
 {
-    pinMode(LED_PIN, OUTPUT);
-    digitalWrite(LED_PIN, HIGH); // LED apagado por defecto
-
-    Serial.begin(115200);
-    delay(100);
-    Serial.println();
-    Serial.println("=====================================");
-    Serial.println("ESP8266 OTA GitHub Updater");
-    Serial.printf("Versión: %s\n", FIRMWARE_VERSION);
-    Serial.println("=====================================");
-
-    blinkLed(3, 100, 100);
-
     WiFi.mode(WIFI_STA);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.begin(appCfg.wifiSsid.c_str(), appCfg.wifiPass.c_str());
 
-    Serial.print("Conectando a WiFi: ");
-    Serial.println(WIFI_SSID);
+    Serial.printf("Conectando a WiFi: %s\n", appCfg.wifiSsid.c_str());
     unsigned long start = millis();
     while (WiFi.status() != WL_CONNECTED && millis() - start < 20000)
     {
@@ -51,29 +39,56 @@ void setup()
         digitalWrite(LED_PIN, HIGH);
         delay(100);
     }
-
     Serial.println();
+
     if (WiFi.status() == WL_CONNECTED)
     {
         Serial.println("WiFi conectado.");
-        Serial.print("IP: ");
-        Serial.println(WiFi.localIP());
+        Serial.printf("IP: %s\n", WiFi.localIP().toString().c_str());
         blinkLed(5, 50, 50);
     }
     else
     {
-        Serial.println("No se pudo conectar a WiFi.");
+        Serial.println("No se pudo conectar al WiFi.");
         blinkLed(5, 200, 200);
     }
+}
 
-    updater.begin();
+void setup()
+{
+    pinMode(LED_PIN, OUTPUT);
+    digitalWrite(LED_PIN, HIGH);
 
-    // FIX: esperar 30s antes del primer check para que el sistema esté estable
+    Serial.begin(115200);
+    delay(200);
+
+    Serial.println();
+    Serial.println("=====================================");
+    Serial.println("  ESP8266 OTA GitHub Updater");
+    Serial.printf ("  Version: %s\n", FIRMWARE_VERSION);
+    Serial.println("=====================================");
+
+    blinkLed(3, 100, 100);
+
+    // Cargar configuración desde NVS
+    configLoad(appCfg);
+
+    // Menú serial — si el usuario cambió el WiFi reconectar con los nuevos datos
+    bool wifiChanged = serialMenuRun(appCfg);
+    (void)wifiChanged;   // siempre reconectamos después del menú
+
+    // Conectar WiFi con la config activa (default o la guardada en NVS)
+    connectWifi();
+
+    updater.begin(appCfg);
+
+    // Primer check OTA a los 30s para que el sistema esté estable
     lastCheck = millis() - OTA_CHECK_INTERVAL_MS + 30000UL;
 }
 
 void loop()
 {
+    // Parpadeo lento del LED como heartbeat
     static unsigned long lastToggle = 0;
     if (millis() - lastToggle > 2000)
     {
@@ -86,9 +101,9 @@ void loop()
         if (millis() - lastCheck >= OTA_CHECK_INTERVAL_MS)
         {
             lastCheck = millis();
-            Serial.println("\nIniciando comprobación OTA...");
+            Serial.println("\nIniciando comprobacion OTA...");
             Serial.printf("Free heap antes de OTA: %u bytes\n", ESP.getFreeHeap());
-            updater.checkForUpdate();
+            updater.checkForUpdate(appCfg);
         }
     }
     else if (millis() - lastReconnectAttempt > 30000)
