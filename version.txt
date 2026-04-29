@@ -7,7 +7,7 @@ git commit -m "bump version 1.0.2"
 git push
 
 # 3. Creás el tag con el mismo número (sin v)
-git tag 1.0.2
+git tag 1.0.2 parece que esto no es necesario
 git push origin 1.0.2
 
 -----------------------------------------
