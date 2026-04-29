@@ -3,7 +3,7 @@
 // ---------------------------------------------------------------------------
 // Versión del firmware — debe coincidir exactamente con el tag de la release
 // ---------------------------------------------------------------------------
-#define FIRMWARE_VERSION "1.0.6"
+#define FIRMWARE_VERSION "1.0.7"
 
 // ---------------------------------------------------------------------------
 // Valores por defecto — se usan solo si NVS está vacío (primer arranque)
