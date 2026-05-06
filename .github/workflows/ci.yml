@@ -3,7 +3,7 @@ name: Build and Release
 on:
   push:
     # Si quieres que SOLO corra con tags, elimina la sección 'branches'
-    # branches: [main]
+    branches: [main]
     tags:
       - "[0-9]*.[0-9]*.[0-9]*" # Nota: usa comillas simples y asegúrate de la indentación y * en ves de +
 
