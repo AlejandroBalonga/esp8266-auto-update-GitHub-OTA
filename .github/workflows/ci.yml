@@ -4,13 +4,13 @@ on:
   push:
     branches: [main]
     tags:
-      - "[0-9]+.[0-9]+.[0-9]+" # dispara solo con tags como 1.0.1
+      - "[0-9]+.[0-9]+.[0-9]+"   # dispara solo con tags como 1.0.6
 
 jobs:
   build:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # necesario para crear releases y subir assets
+      contents: write   # necesario para crear releases y subir assets
 
     steps:
       - uses: actions/checkout@v3
@@ -25,21 +25,30 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
+      # Cuando es un tag, sobreescribir FIRMWARE_VERSION en config.h con el
+      # valor del tag antes de compilar, para que el binario tenga la versión
+      # correcta sin depender de que el desarrollador la actualice a mano.
+      - name: Patch FIRMWARE_VERSION
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          VERSION=${{ github.ref_name }}
+          sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"$VERSION\"/" include/config.h
+          echo "FIRMWARE_VERSION parcheado a: $VERSION"
+          grep FIRMWARE_VERSION include/config.h
+
       - name: Build firmware
         run: pio run
 
-      # Lee la versión desde version.txt solo cuando viene de un tag
       - name: Get version from tag
         if: startsWith(github.ref, 'refs/tags/')
         id: version
         run: echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
 
-      # Crea la release SOLO cuando el push es un tag (no en cada commit a main)
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.version }} # ej: 1.0.2  (sin v)
+          tag_name: ${{ steps.version.outputs.version }}
           name: Release ${{ steps.version.outputs.version }}
           draft: false
           prerelease: false
