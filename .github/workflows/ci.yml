@@ -20,6 +20,11 @@ jobs:
         with:
           python-version: "3.9"
 
+      - name: Install PlatformIO
+        run: |
+          python -m pip install --upgrade pip
+          pip install platformio
+
       # Cuando es un tag, sobreescribir FIRMWARE_VERSION en config.h con el
       # valor del tag antes de compilar, para que el binario tenga la versión
       # correcta sin depender de que el desarrollador la actualice a mano.
@@ -30,11 +35,6 @@ jobs:
           sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"$VERSION\"/" include/config.h
           echo "FIRMWARE_VERSION parcheado a: $VERSION"
           grep FIRMWARE_VERSION include/config.h
-
-      - name: Install PlatformIO
-        run: |
-          python -m pip install --upgrade pip
-          pip install platformio
 
       - name: Build firmware
         run: pio run
