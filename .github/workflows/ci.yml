@@ -2,15 +2,18 @@ name: Build and Release
 
 on:
   push:
-    branches: [main]
+    # Si quieres que SOLO corra con tags, elimina la sección 'branches'
+    # branches: [main]
     tags:
-      - "[0-9]+.[0-9]+.[0-9]+" # dispara solo con tags como 1.0.6
+      - "[0-9]+.[0-9]+.[0-9]+" # Nota: usa comillas simples y asegúrate de la indentación
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Si el workflow se dispara por un tag, este if global asegura que todo el job se detenga si no es un tag
+    if: startsWith(github.ref, 'refs/tags/')
     permissions:
-      contents: write # necesario para crear releases y subir assets
+      contents: write
 
     steps:
       - uses: actions/checkout@v3
@@ -25,31 +28,20 @@ jobs:
           python -m pip install --upgrade pip
           pip install platformio
 
-      # Cuando es un tag, sobreescribir FIRMWARE_VERSION en config.h con el
-      # valor del tag antes de compilar, para que el binario tenga la versión
-      # correcta sin depender de que el desarrollador la actualice a mano.
       - name: Patch FIRMWARE_VERSION
-        if: startsWith(github.ref, 'refs/tags/')
         run: |
           VERSION=${{ github.ref_name }}
           sed -i "s/#define FIRMWARE_VERSION \".*\"/#define FIRMWARE_VERSION \"$VERSION\"/" include/config.h
           echo "FIRMWARE_VERSION parcheado a: $VERSION"
-          grep FIRMWARE_VERSION include/config.h
 
       - name: Build firmware
         run: pio run
 
-      - name: Get version from tag
-        if: startsWith(github.ref, 'refs/tags/')
-        id: version
-        run: echo "version=${{ github.ref_name }}" >> $GITHUB_OUTPUT
-
       - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ steps.version.outputs.version }}
-          name: Release ${{ steps.version.outputs.version }}
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
           files: .pio/build/d1_mini/firmware.bin
